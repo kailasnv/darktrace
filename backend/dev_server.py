@@ -1,11 +1,4 @@
-"""Minimal development API for running the DarkTrace frontend.
 
-Still no real database, crawler, or external service clients -- users,
-sessions, and queued jobs stay in-memory and are cleared on restart.
-Alerts are the one exception: they're persisted to Redis via
-redis_store.py, so alerts (and their review status) survive a restart
-and can be shared across anyone pointed at the same Redis instance.
-"""
 
 from __future__ import annotations
 

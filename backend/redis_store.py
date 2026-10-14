@@ -6,7 +6,7 @@ gone the moment the process restarted. This module is a drop-in
 replacement: same shape of data, same create/list operations, but
 backed by Redis so alerts (and their review status) survive restarts
 and are shared across anyone pointed at the same Redis instance
-(e.g. a team's shared Railway database).
+
 
 Storage layout:
     darktrace:alert:{id}      -- one JSON string per alert (a Redis "hash of alerts")
