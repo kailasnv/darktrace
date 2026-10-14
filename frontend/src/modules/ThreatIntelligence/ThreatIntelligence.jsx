@@ -1,7 +1,7 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom"; // INTEGRATION
 import "./ThreatIntelligence.css";
-import { getAlerts, alertToThreat } from "../../api"; // BACKEND
+import { getAlerts, reviewAlert, alertToThreat } from "../../api"; // BACKEND
 import { useToast } from "../../components/ui"; // BACKEND
 
 const initialThreats = [
@@ -411,9 +411,9 @@ function ThreatDetails({
           className={`review-button ${isReviewed ? "is-reviewed" : ""}`}
           disabled={isReviewed}
           onClick={() => onReviewed(threat.id)}
-          title="Alert review updates are stored in this browser session until a backend endpoint is available"
+          title="Marks this alert reviewed and saves it via PATCH /api/v1/alerts/{id}"
         >
-          {isReviewed ? "Reviewed locally" : "Mark reviewed locally"}
+          {isReviewed ? "Reviewed" : "Mark reviewed"}
         </button>
       </aside>
     </div>,
@@ -425,9 +425,10 @@ export default function ThreatIntelligence() {
   const toast = useToast();
   const [threats, setThreats] = useState([]);
   const [loadError, setLoadError] = useState(false);
-  const reviewedIds = useRef(new Set()); // keeps "Reviewed" across refreshes
 
   // BACKEND: load alerts from GET /api/v1/alerts, refresh every 30 s.
+  // Review status now comes back from the server (PATCH /api/v1/alerts/{id}
+  // persists it), so there's no client-side "reviewed" tracking to merge in.
   useEffect(() => {
     let alive = true;
     let warned = false;
@@ -435,11 +436,7 @@ export default function ThreatIntelligence() {
       try {
         const data = await getAlerts();
         if (!alive) return;
-        setThreats(
-          data.map(alertToThreat).map((t) =>
-            reviewedIds.current.has(t.id) ? { ...t, status: "Reviewed" } : t
-          )
-        );
+        setThreats(data.map(alertToThreat));
         setLoadError(false);
         setLastUpdate(0);
       } catch {
@@ -550,15 +547,26 @@ export default function ThreatIntelligence() {
     }
   };
 
-  const handleReviewed = (threatId) => {
-    reviewedIds.current.add(threatId);
+  const handleReviewed = async (threatId) => {
+    // Optimistic update -- the card flips to "Reviewed" immediately,
+    // then we persist it. If the request fails, we roll the card back
+    // and tell the analyst, rather than leaving a false "Reviewed" state.
     setThreats((currentThreats) =>
       currentThreats.map((threat) =>
-        threat.id === threatId
-          ? { ...threat, status: "Reviewed" }
-          : threat
+        threat.id === threatId ? { ...threat, status: "Reviewed" } : threat
       )
     );
+
+    try {
+      await reviewAlert(threatId, { status: "Reviewed" });
+    } catch {
+      setThreats((currentThreats) =>
+        currentThreats.map((threat) =>
+          threat.id === threatId ? { ...threat, status: "Active" } : threat
+        )
+      );
+      toast.warning("Could not save review status - try again");
+    }
   };
 
   const resetFilters = () => {

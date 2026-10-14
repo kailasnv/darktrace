@@ -1,8 +1,10 @@
-"""Minimal in-memory API for running the DarkTrace frontend during development.
+"""Minimal development API for running the DarkTrace frontend.
 
-This is intentionally not the production backend. It has no database, crawler,
-external service clients, JWTs, or persistent storage. Restarting the process
-clears all accounts, sessions, alerts, and queued jobs.
+Still no real database, crawler, or external service clients -- users,
+sessions, and queued jobs stay in-memory and are cleared on restart.
+Alerts are the one exception: they're persisted to Redis via
+redis_store.py, so alerts (and their review status) survive a restart
+and can be shared across anyone pointed at the same Redis instance.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import redis_store
+
 app = FastAPI(title="DarkTrace development API", version="0.1.0-dev")
 app.add_middleware(
     CORSMiddleware,
@@ -29,7 +33,6 @@ app.add_middleware(
 
 _users: dict[str, dict] = {}
 _sessions: dict[str, str] = {}
-_alerts: list[dict] = []
 _jobs: list[dict] = []
 _sources = [
     {
@@ -66,6 +69,13 @@ class AlertPayload(BaseModel):
     type: str | None = None
     source: str | None = None
     description: str | None = None
+
+
+class AlertReviewPayload(BaseModel):
+    """Body for PATCH /api/v1/alerts/{alert_id} -- the route unimplimented.md
+    calls out under 'Persistent alert review'."""
+    status: Literal["Active", "Reviewed"] = "Reviewed"
+    note: str | None = None
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> tuple[bytes, bytes]:
@@ -142,20 +152,32 @@ async def me(user: dict = Depends(_current_user)) -> dict:
 
 @app.get("/api/v1/alerts", tags=["Alerting"])
 async def list_alerts(_: dict = Depends(_current_user)) -> list[dict]:
-    return list(reversed(_alerts))
+    return redis_store.list_alerts()
 
 
 @app.post("/api/v1/alerts", status_code=status.HTTP_201_CREATED, tags=["Alerting"])
 async def create_alert(payload: AlertPayload, _: dict = Depends(_current_user)) -> dict:
-    alert = {"id": f"alert_dev_{len(_alerts) + 1:03d}", **payload.model_dump(), "created_at": datetime.now(timezone.utc).isoformat()}
-    _alerts.append(alert)
-    return alert
+    return redis_store.create_alert(payload.model_dump())
+
+
+@app.patch("/api/v1/alerts/{alert_id}", tags=["Alerting"])
+async def review_alert(
+    alert_id: str, payload: AlertReviewPayload, user: dict = Depends(_current_user)
+) -> dict:
+    """Persists a review decision (status, reviewer, timestamp, optional
+    note) for an alert -- the route unimplimented.md marked missing."""
+    updated = redis_store.update_alert_review(
+        alert_id, status=payload.status, reviewer_id=user["usr_id"], note=payload.note
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return updated
 
 
 @app.get("/api/v1/dashboard/summary", tags=["Dashboard"])
 async def dashboard_summary(_: dict = Depends(_current_user)) -> dict:
     counts = {severity: 0 for severity in ("critical", "high", "medium", "low")}
-    for alert in _alerts:
+    for alert in redis_store.list_alerts():
         counts[alert["severity"]] += 1
     return {"total_cases": 0, "open_cases": 0, "alerts_by_severity": counts}
 

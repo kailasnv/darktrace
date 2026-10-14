@@ -128,6 +128,12 @@ export async function apiFetch(path, options = {}, retried = false) {
 }
 
 export const getAlerts = () => apiFetch('/api/v1/alerts');
+export const reviewAlert = (alertId, { status = 'Reviewed', note } = {}) =>
+  apiFetch(`/api/v1/alerts/${encodeURIComponent(alertId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, note }),
+  });
 export const getSummary = () => apiFetch('/api/v1/dashboard/summary');
 export const getMe = () => apiFetch('/api/v1/auth/me');
 
